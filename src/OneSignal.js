@@ -180,6 +180,23 @@ export default class OneSignal {
         OneSignal.notifyButton.create();
       }
     }
+
+    if (Browser.safari && OneSignal.config.autoRegister === false) {
+      OneSignal.isPushNotificationsEnabled(enabled => {
+        if (enabled) {
+          /*  The user is on Safari and *specifically* set autoRegister to false.
+              The normal case for a user on Safari is to not set anything related to autoRegister.
+              With autoRegister false, we don't automatically show the permission prompt on Safari.
+              However, if push notifications are already enabled, we're actually going to make the same
+              subscribe call and register the device token, because this will return the same device
+              token and allow us to update the user's session count and last active.
+              For sites that omit autoRegister, autoRegister is assumed to be true. For Safari, the session count
+              and last active is updated from this registration call.
+           */
+          OneSignal._sessionInit({});
+        }
+      });
+    }
   }
 
   static _onDatabaseRebuilt() {
@@ -570,9 +587,6 @@ export default class OneSignal {
       opPromises.push(OneSignal._saveInitOptions());
       Promise.all(opPromises)
         .then(() => {
-          if (contains(location.search, "continuingSession=true"))
-            return;
-
           /* 3/20/16: In the future, if navigator.serviceWorker.ready is unusable inside of an insecure iFrame host, adding a message event listener will still work. */
           //if (navigator.serviceWorker) {
             //log.warn('We have added an event listener for service worker messages.', Environment.getEnv());
@@ -601,9 +615,6 @@ export default class OneSignal {
   static _initPopup() {
     OneSignal.config = {};
     OneSignal.initialized = true;
-
-    if (contains(location.search, "continuingSession=true"))
-      return;
 
     // Do not register OneSignalSDKUpdaterWorker.js for HTTP popup sites; the file does not exist
     navigator.serviceWorker.register(OneSignal.SERVICE_WORKER_PATH, OneSignal.SERVICE_WORKER_PARAM).then(OneSignal._enableNotifications, OneSignal._registerError);
@@ -861,7 +872,12 @@ export default class OneSignal {
     else if ('serviceWorker' in navigator && !OneSignal.isUsingSubscriptionWorkaround()) // If HTTPS - Show native prompt
       OneSignal._registerForW3CPush(options);
 
-    Event.trigger(OneSignal.EVENTS.SDK_INITIALIZED);
+    if (OneSignal.isUsingSubscriptionWorkaround() && !OneSignalHelpers.isContinuingBrowserSession()) {
+      OneSignalHelpers.registerWithOneSignal(OneSignal.getAppId(), null)
+          .then(() => Event.trigger(OneSignal.EVENTS.SDK_INITIALIZED));
+    } else {
+      Event.trigger(OneSignal.EVENTS.SDK_INITIALIZED);
+    }
   }
 
   /*
